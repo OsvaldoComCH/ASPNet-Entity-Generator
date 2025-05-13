@@ -7,6 +7,8 @@ param(
 
 $Config = Get-Content .\config.cfg
 
+$BuiltInTypes = @("bool", "byte", "sbyte", "char", "decimal", "double", "float", "int", "uint", "nint", "nuint", "long", "ulong", "short", "ushort", "string")
+
 $Variables = @{}
 
 foreach($Option in $Config)
@@ -119,28 +121,302 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
     $EntityFile = Get-Content "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName).cs"
     foreach($line in $EntityFile)
     {
-        if($line -cmatch "{")
+        if($Reading -eq $false -and $line -cmatch "{")
         {
             $Reading = $true
-        }elseif($line.Trim() -eq "}")
+            continue
+        }elseif($Reading -eq $true -and $line.Trim() -eq "}")
         {
             $Reading = $false
         }
 
         if($Reading)
         {
-            if($line -cmatch "required")
-            {
-                $Req.Add($true)
-            }else
-            {
-                $Req.Add($false)
-            }
 
-            $end = $line.IndexOf(";")
-            Write-Output $end
+            $end = $line.IndexOfAny((';', '{'))
+            if($end -ge 1)
+            {
+                if($line -cmatch " required ")
+                {
+                    $Req.Add($true)
+                }else
+                {
+                    $Req.Add($false)
+                }
+                $start = $line.Substring(0, $end - 1).TrimEnd().LastIndexOf(' ')
+                $VarName.Add($line.Substring($start + 1, $end - $start - 1).Trim())
+
+                $end = $start
+                $start = $line.Substring(0, $end - 1).TrimEnd().LastIndexOf(' ')
+                $Type.Add($line.Substring($start + 1, $end - $start - 1).Trim(" ", "?"))
+            }
         }
     }
+
+    $File = Get-Content "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs" -Raw
+
+    $x = [regex]::Match($File, "public record $($EntityName)DTO\(")
+    $start = $x.Index + $x.Length
+    $scope = 1
+    $y = $start
+
+    while($true)
+    {
+        $y++
+        if($File[$y] -eq '(')
+        {
+            $scope++
+        }elseif($File[$y] -eq ')')
+        {
+            $scope--
+            if($scope -eq 0)
+            {
+                break
+            }
+        }
+    }
+
+    $File = $File.Remove($start, $y - ($start + 1))
+
+    $x = $File.Substring(0, $start) + "`r`n    int Id,"
+    for($i = 0; $i -lt $VarName.Count; $i++)
+    {
+        if($BuiltInTypes -contains $Type[$i])
+        {
+            $x += "`r`n    $($Type[$i])"
+
+            if($Req[$i] -eq $false)
+            {
+                $x += "?"
+            }
+
+            $x += " $($VarName[$i]),"
+        }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($Type[$i])\Models\$($Type[$i]).cs")
+        {
+            $x += "`r`n    int"
+
+            if($Req[$i] -eq $false)
+            {
+                $x += "?"
+            }
+
+            $x += " $($VarName[$i])Id,"
+        }
+    }
+
+    $File = $x.Substring(0, $x.Length - 1) + "`r`n" + $File.Substring($start + 1)
+
+    # Parte dois
+
+    $x = [regex]::Match($File, "return new $($EntityName)DTO\(")
+    $start = $x.Index + $x.Length
+    $scope = 1
+    $y = $start
+
+    while($true)
+    {
+        $y++
+        if($File[$y] -eq '(')
+        {
+            $scope++
+        }elseif($File[$y] -eq ')')
+        {
+            $scope--
+            if($scope -eq 0)
+            {
+                break
+            }
+        }
+    }
+
+    $File = $File.Remove($start, $y - ($start + 1))
+
+    $x = $File.Substring(0, $start) + "`r`n            obj.Id,"
+    for($i = 0; $i -lt $VarName.Count; $i++)
+    {
+        if($BuiltInTypes -contains $Type[$i])
+        {
+            $x += "`r`n            obj.$($VarName[$i]),"
+        }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($Type[$i])\Models\$($Type[$i]).cs")
+        {
+            $x += "`r`n            obj.$($VarName[$i]).Id,"
+        }
+    }
+
+
+
+    $File = $x.Substring(0, $x.Length - 1) + "`r`n        " + $File.Substring($start + 1)
+
+    Write-Output $File
+    #  | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs"
+
+    $File = Get-Content "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs" -Raw
+
+    $x = [regex]::Match($File, "public class $($EntityName)CreatePayload")
+    $y = $x.Index + $x.Length
+
+    while($true)
+    {
+        $y++
+        if($File[$y] -eq '{')
+        {
+            break
+        }
+    }
+    $start = $y + 1
+    $scope = 1
+
+    while($true)
+    {
+        $y++
+        if($File[$y] -eq '{')
+        {
+            $scope++
+        }elseif($File[$y] -eq '}')
+        {
+            $scope--
+            if($scope -eq 0)
+            {
+                break
+            }
+        }
+    }
+
+    $File = $File.Remove($start, $y - ($start + 1))
+
+    $x = $File.Substring(0, $start)
+    for($i = 0; $i -lt $VarName.Count; $i++)
+    {
+        $IsList = $false
+        $TrueType = $Type[$i]
+
+        if($Type[$i] -cmatch ".*<.*>")
+        {
+            $IsList = $true
+            $open = $Type[$i].LastIndexOf('<') + 1
+            $close = $Type[$i].IndexOf('>')
+            $TrueType = $Type[$i].Substring($open, $close - $open)
+        }elseif($Type[$i] -cmatch ".*\[\]")
+        {
+            $IsList = $true
+            $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
+        }
+
+        if($BuiltInTypes -contains $TrueType)
+        {
+            if($Req[$i])
+            {
+                $x += "`r`n    [Required]`r`n    public required $($TrueType) $($VarName[$i])"
+            }else
+            {
+                $x += "`r`n    public $($TrueType)? $($VarName[$i])"
+            }
+
+            $x += " {get;set;}"
+        }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs")
+        {
+            if($Req[$i])
+            {
+                $x += "`r`n    [Required]`r`n    public required int $($VarName[$i])Id"
+            }else
+            {
+                $x += "`r`n    public int? $($VarName[$i])Id"
+            }
+
+            $x += " {get;set;}"
+        }
+    }
+
+    $File = $x + "`r`n" + $File.Substring($start + 1)
+
+    $x = [regex]::Match($File, "public class $($EntityName)UpdatePayload")
+    $y = $x.Index + $x.Length
+
+    while($true)
+    {
+        $y++
+        if($File[$y] -eq '{')
+        {
+            break
+        }
+    }
+    $start = $y + 1
+    $scope = 1
+
+    while($true)
+    {
+        $y++
+        if($File[$y] -eq '{')
+        {
+            $scope++
+        }elseif($File[$y] -eq '}')
+        {
+            $scope--
+            if($scope -eq 0)
+            {
+                break
+            }
+        }
+    }
+
+    $File = $File.Remove($start, $y - ($start + 1))
+
+    $x = $File.Substring(0, $start)
+    for($i = 0; $i -lt $VarName.Count; $i++)
+    {
+        $IsList = $false
+        $TrueType = $Type[$i]
+
+        if($Type[$i] -cmatch ".*<.*>")
+        {
+            $IsList = $true
+            $open = $Type[$i].LastIndexOf('<') + 1
+            $close = $Type[$i].IndexOf('>')
+            $TrueType = $Type[$i].Substring($open, $close - $open)
+        }elseif($Type[$i] -cmatch ".*\[\]")
+        {
+            $IsList = $true
+            $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
+        }
+
+        if($BuiltInTypes -contains $TrueType)
+        {
+            if($IsList)
+            {
+                $x += "`r`n    public ICollection<$($TrueType)> $($VarName[$i])"
+            }else
+            {
+                $x += "`r`n    public $($TrueType)? $($VarName[$i])"
+            }
+
+            $x += " {get;set;}"
+
+            if($i -ge $VarName.Count - 1)
+            {
+                $x += "`r`n"
+            }
+        }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs")
+        {
+            if($IsList)
+            {
+                $x += "`r`n    public ICollection<int> $($VarName[$i])"
+            }else
+            {
+                $x += "`r`n    public int? $($VarName[$i])Id"
+            }
+
+            $x += " {get;set;}"
+
+            if($i -ge $VarName.Count - 1)
+            {
+                $x += "`r`n"
+            }
+        }
+    }
+
+    $File = $x + "`r`n" + $File.Substring($start + 1)
+
+    Write-Output $File
 
     return
 }

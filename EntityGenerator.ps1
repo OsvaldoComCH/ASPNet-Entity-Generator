@@ -111,12 +111,34 @@ $EntityNameLower = $EntityName.toLower()
 
 if($PSBoundParameters.ContainsKey("ImplementEntity"))
 {
+    $Req = [System.Collections.ArrayList]::new()
+    $Type = [System.Collections.ArrayList]::new()
+    $VarName = [System.Collections.ArrayList]::new()
+    $Reading = $false
+
     $EntityFile = Get-Content "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName).cs"
     foreach($line in $EntityFile)
     {
         if($line -cmatch "{")
         {
-            Write-Output "Ok"
+            $Reading = $true
+        }elseif($line.Trim() -eq "}")
+        {
+            $Reading = $false
+        }
+
+        if($Reading)
+        {
+            if($line -cmatch "required")
+            {
+                $Req.Add($true)
+            }else
+            {
+                $Req.Add($false)
+            }
+
+            $end = $line.IndexOf(";")
+            Write-Output $end
         }
     }
 

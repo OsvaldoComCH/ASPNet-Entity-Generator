@@ -1,6 +1,8 @@
 param(
-    [Parameter(Mandatory=$true)][string]$EntityName,
-    [switch]$CreateDbContext
+    [string]$EntityName = "",
+    [switch]$CreateDbContext,
+    [switch]$ImplementEntity,
+    [switch]$GenerateExtensions
 )
 
 $Config = Get-Content .\config.cfg
@@ -17,9 +19,54 @@ foreach($Option in $Config)
     $Variables.Add($x[0], $x[1])
 }
 
+if($PSBoundParameters.ContainsKey("GenerateExtensions"))
+{
+    New-Item -Path "$($Variables["TargetRootPath"])\Configuration\ConfigureRepositoriesExtension.cs" -ItemType File -Force
+    New-Item -Path "$($Variables["TargetRootPath"])\Configuration\ConfigureServicesExtension.cs" -ItemType File -Force
+
+    Write-Output @"
+using Api.Core.Repositories;
+using Api.Domain.Models;
+using Api.Domain.Repositories;
+
+namespace Api.Configuration;
+
+//Do not erase comments, as they are used by the generation script
+public static partial class ServiceCollectionExtension
+{
+    public static IServiceCollection ConfigureEntityRepositories(this IServiceCollection services)
+    {
+        //Repositories
+        return services;
+    }
+}
+"@ | Out-File -FilePath "$($Variables["TargetRootPath"])\Configuration\ConfigureRepositoriesExtension.cs"
+
+    Write-Output @"
+using Api.Core.Services;
+using Api.Domain.Models;
+using Api.Domain.Services;
+
+namespace Api.Configuration;
+
+//Do not erase comments, as they are used by the generation script
+public static partial class ServiceCollectionExtension
+{
+    public static IServiceCollection ConfigureEntityServices(this IServiceCollection services)
+    {
+        //Services
+        return services;
+    }
+}
+"@ | Out-File -FilePath "$($Variables["TargetRootPath"])\Configuration\ConfigureServicesExtension.cs"
+}
+
 if($PSBoundParameters.ContainsKey("CreateDbContext"))
 {
+
+    if($EntityName -eq ""){$EntityName = $Variables["DbContext"]}
     New-Item -Path "$($Variables["TargetRootPath"])\Core\$($EntityName).cs" -ItemType File -Force
+
     Write-Output @"
 using Api.Domain.Models;
 using Api.Core.Mapping;
@@ -58,7 +105,23 @@ public class $($EntityName) : DbContext
     return
 }
 
+if($EntityName -eq ""){return}
+
 $EntityNameLower = $EntityName.toLower()
+
+if($PSBoundParameters.ContainsKey("ImplementEntity"))
+{
+    $EntityFile = Get-Content "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName).cs"
+    foreach($line in $EntityFile)
+    {
+        if($line -cmatch "{")
+        {
+            Write-Output "Ok"
+        }
+    }
+
+    return
+}
 
 New-Item -Path "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName).cs" -ItemType File -Force
 New-Item -Path "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs" -ItemType File -Force
@@ -157,7 +220,7 @@ using Api.Domain.Repositories;
 
 namespace Api.Core.Repositories;
 
-public class $($EntityName)Repository($($Variables["DbContextName"]) context)
+public class $($EntityName)Repository($($Variables["DbContext"]) context)
     : BaseRepository<$($EntityName)>(context), I$($EntityName)Repository
 {
     
@@ -194,3 +257,43 @@ foreach($line in $Content)
 }
 
 Write-Output $ContentOut.TrimEnd("`r", "`n") | Out-File -FilePath "$($Variables["TargetRootPath"])\Core\$($Variables["DbContext"]).cs"
+
+
+
+$Content = Get-Content "$($Variables["TargetRootPath"])\Configuration\ConfigureRepositoriesExtension.cs"
+$ContentOut = ""
+
+foreach($line in $Content)
+{
+    $ContentOut += "$line`n"
+    if($line.Trim() -eq "//Repositories")
+    {
+        $ContentOut += @"
+        services.AddScoped<BaseRepository<$($EntityName)>, $($EntityName)Repository>();
+        services.AddScoped<I$($EntityName)Repository, $($EntityName)Repository>();
+
+"@
+    }
+}
+
+Write-Output $ContentOut.TrimEnd("`r", "`n") | Out-File -FilePath "$($Variables["TargetRootPath"])\Configuration\ConfigureRepositoriesExtension.cs"
+
+
+
+$Content = Get-Content "$($Variables["TargetRootPath"])\Configuration\ConfigureServicesExtension.cs"
+$ContentOut = ""
+
+foreach($line in $Content)
+{
+    $ContentOut += "$line`n"
+    if($line.Trim() -eq "//Services")
+    {
+        $ContentOut += @"
+        services.AddScoped<BaseService<$($EntityName)>, $($EntityName)Service>();
+        services.AddScoped<I$($EntityName)Service, $($EntityName)Service>();
+
+"@
+    }
+}
+
+Write-Output $ContentOut.TrimEnd("`r", "`n") | Out-File -FilePath "$($Variables["TargetRootPath"])\Configuration\ConfigureServicesExtension.cs"

@@ -4,7 +4,8 @@ param(
     [switch]$ImplementEntity,
     [switch]$GenerateExtensions,
     [switch]$UseDTO,
-    [switch]$MapFK
+    [switch]$MapFK,
+    [switch]$SkipMap
 )
 
 $Config = Get-Content .\config.cfg
@@ -12,6 +13,25 @@ $Config = Get-Content .\config.cfg
 $BuiltInTypes = @("bool", "byte", "sbyte", "char", "decimal", "double", "float", "int", "uint", "nint", "nuint", "long", "ulong", "short", "ushort", "string")
 
 $Variables = @{}
+
+function ToSnake
+{
+    param(
+        [Parameter(Mandatory=$true)][string]$Value
+    )
+
+    for($i = 1; $i -lt $Value.Length; $i++)
+    {
+        if($Value[$i] -cmatch '[A-Z]')
+        {
+            $Value = $Value.Substring(0, $i) + "_" + $Value.Substring($i)
+            $i++
+        }
+    }
+    $Value = $Value.ToLower()
+
+    return $Value
+}
 
 foreach($Option in $Config)
 {
@@ -111,7 +131,7 @@ public class $($EntityName) : DbContext
 
 if($EntityName -eq ""){return}
 
-$EntityNameLower = $EntityName.toLower()
+$EntityNameLower = ToSnake $EntityName
 
 if($PSBoundParameters.ContainsKey("ImplementEntity"))
 {
@@ -505,7 +525,79 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
     $File = $x + "`r`n" + $File.Substring($start + 1)
 
     # Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs"
+    
+    if($PSBoundParameters.ContainsKey("SkipMap")){return}
 
+    $File = Get-Content "$($Variables["TargetRootPath"])\Core\Entities\$($EntityName)\Mapping\$($EntityName)ClassMap.cs" -Raw
+
+    $x = [regex]::Match($File, "builder.ToTable(`"tb_$($EntityNameLower)`");")
+    $y = $x.Index + $x.Length
+
+    $start = $y
+    $scope = 1
+
+    while($true)
+    {
+        $y++
+        if($File[$y] -eq '}')
+        {
+            break
+        }
+    }
+
+    $File = $File.Remove($start, $y - ($start + 1))
+
+    $x = $File.Substring(0, $start)
+    for($i = 0; $i -lt $VarName.Count; $i++)
+    {
+        $IsList = $false
+        $TrueType = $Type[$i]
+
+        if($Type[$i] -cmatch "[(ICollection)(IEnumerable)]<.*>")
+        {
+            $IsList = $true
+            $open = $Type[$i].LastIndexOf('<') + 1
+            $close = $Type[$i].IndexOf('>')
+            $TrueType = $Type[$i].Substring($open, $close - $open)
+        }elseif($Type[$i] -cmatch ".*\[\]")
+        {
+            $IsList = $true
+            $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
+        }
+
+        if($BuiltInTypes -contains $TrueType -and $IsList -eq $false)
+        {
+            $x += @"
+        builder.Property($($EntityNameLower) => $($EntityNameLower).$($VarName[$i]))
+            .HasColumnName("$(ToSnake $VarName[$i])")
+"@
+            if($TrueType -eq "string")
+            {
+                $x += "`r`n            .HasMaxLength(255)"
+            }
+            $x += ";`r`n`r`n"
+        }elseif($PSBoundParameters.ContainsKey("MapFK") -and (Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs"))
+        {
+            if($IsList)
+            {
+                $x += "`r`n    public IEnumerable<int> $($VarName[$i])"
+            }else
+            {
+                $x += "`r`n    public int? $($VarName[$i])Id"
+            }
+
+            $x += " {get;set;}"
+
+            if($i -ge $VarName.Count - 1)
+            {
+                $x += "`r`n"
+            }
+        }
+    }
+
+    $File = $x + "`r`n" + $File.Substring($start + 1)
+
+    Write-Output $File
 
     return
 }

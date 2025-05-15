@@ -2,7 +2,9 @@ param(
     [string]$EntityName = "",
     [switch]$CreateDbContext,
     [switch]$ImplementEntity,
-    [switch]$GenerateExtensions
+    [switch]$GenerateExtensions,
+    [switch]$UseDTO,
+    [switch]$MapFK
 )
 
 $Config = Get-Content .\config.cfg
@@ -181,26 +183,72 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
     $x = $File.Substring(0, $start) + "`r`n    int Id,"
     for($i = 0; $i -lt $VarName.Count; $i++)
     {
-        if($BuiltInTypes -contains $Type[$i])
+        $IsList = $false
+        $TrueType = $Type[$i]
+
+        if($Type[$i] -cmatch "[(ICollection)(IEnumerable)]<.*>")
         {
-            $x += "`r`n    $($Type[$i])"
-
-            if($Req[$i] -eq $false)
-            {
-                $x += "?"
-            }
-
-            $x += " $($VarName[$i]),"
-        }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($Type[$i])\Models\$($Type[$i]).cs")
+            $IsList = $true
+            $open = $Type[$i].LastIndexOf('<') + 1
+            $close = $Type[$i].IndexOf('>')
+            $TrueType = $Type[$i].Substring($open, $close - $open)
+        }elseif($Type[$i] -cmatch ".*\[\]")
         {
-            $x += "`r`n    int"
+            $IsList = $true
+            $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
+        }
 
-            if($Req[$i] -eq $false)
+        if($BuiltInTypes -contains $TrueType)
+        {
+            if($IsList)
             {
-                $x += "?"
-            }
+                $x += "`r`n    IEnumerable<$($TrueType)> $($VarName[$i]),"
+            }else
+            {
+                $x += "`r`n    $($TrueType)"
 
-            $x += " $($VarName[$i])Id,"
+                if($Req[$i] -eq $false)
+                {
+                    $x += "?"
+                }
+
+                $x += " $($VarName[$i]),"
+            }
+        }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs")
+        {
+            if($PSBoundParameters.ContainsKey("UseDTO"))
+            {
+                if($IsList)
+                {
+                    $x += "`r`n    IEnumerable<$($TrueType)DTO> $($VarName[$i]),"
+                }else
+                {
+                    $x += "`r`n    $($TrueType)DTO"
+
+                    if($Req[$i] -eq $false)
+                    {
+                        $x += "?"
+                    }
+
+                    $x += " $($VarName[$i]),"
+                }
+            }else
+            {
+                if($IsList)
+                {
+                    $x += "`r`n    IEnumerable<int> $($VarName[$i]),"
+                }else
+                {
+                    $x += "`r`n    int"
+
+                    if($Req[$i] -eq $false)
+                    {
+                        $x += "?"
+                    }
+
+                    $x += " $($VarName[$i])Id,"
+                }
+            }
         }
     }
 
@@ -234,21 +282,51 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
     $x = $File.Substring(0, $start) + "`r`n            obj.Id,"
     for($i = 0; $i -lt $VarName.Count; $i++)
     {
-        if($BuiltInTypes -contains $Type[$i])
+        $IsList = $false
+        $TrueType = $Type[$i]
+
+        if($Type[$i] -cmatch "[(ICollection)(IEnumerable)]<.*>")
+        {
+            $IsList = $true
+            $open = $Type[$i].LastIndexOf('<') + 1
+            $close = $Type[$i].IndexOf('>')
+            $TrueType = $Type[$i].Substring($open, $close - $open)
+        }elseif($Type[$i] -cmatch ".*\[\]")
+        {
+            $IsList = $true
+            $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
+        }
+
+        if($BuiltInTypes -contains $TrueType)
         {
             $x += "`r`n            obj.$($VarName[$i]),"
-        }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($Type[$i])\Models\$($Type[$i]).cs")
+        }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs")
         {
-            $x += "`r`n            obj.$($VarName[$i]).Id,"
+            if($PSBoundParameters.ContainsKey("UseDTO"))
+            {
+                if($IsList)
+                {
+                    $x += "`r`n            obj.$($VarName[$i]).Select(item => $($TrueType)DTO.Map(item)),"
+                }else
+                {
+                    $x += "`r`n            $($TrueType)DTO.Map(obj.$($VarName[$i]))"
+                }
+            }else
+            {
+                if($IsList)
+                {
+                    $x += "`r`n            obj.$($VarName[$i]).Select(item => item.Id),"
+                }else
+                {
+                    $x += "`r`n            obj.$($VarName[$i]).Id,"
+                }
+            }
         }
     }
 
-
-
     $File = $x.Substring(0, $x.Length - 1) + "`r`n        " + $File.Substring($start + 1)
 
-    Write-Output $File
-    #  | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs"
+    # Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs"
 
     $File = Get-Content "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs" -Raw
 
@@ -290,7 +368,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
         $IsList = $false
         $TrueType = $Type[$i]
 
-        if($Type[$i] -cmatch ".*<.*>")
+        if($Type[$i] -cmatch "[(ICollection)(IEnumerable)]<.*>")
         {
             $IsList = $true
             $open = $Type[$i].LastIndexOf('<') + 1
@@ -304,25 +382,35 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
 
         if($BuiltInTypes -contains $TrueType)
         {
-            if($Req[$i])
+            if($IsList)
             {
-                $x += "`r`n    [Required]`r`n    public required $($TrueType) $($VarName[$i])"
+                $x += "`r`n    [Required]`r`n    public required IEnumerable<$($TrueType)> $($VarName[$i])"
             }else
             {
-                $x += "`r`n    public $($TrueType)? $($VarName[$i])"
+                if($Req[$i])
+                {
+                    $x += "`r`n    [Required]`r`n    public required $($TrueType) $($VarName[$i])"
+                }else
+                {
+                    $x += "`r`n    public $($TrueType)? $($VarName[$i])"
+                }
             }
-
             $x += " {get;set;}"
         }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs")
         {
-            if($Req[$i])
+            if($IsList)
             {
-                $x += "`r`n    [Required]`r`n    public required int $($VarName[$i])Id"
+                $x += "`r`n    [Required]`r`n    public required IEnumerable<int> $($VarName[$i])"
             }else
             {
-                $x += "`r`n    public int? $($VarName[$i])Id"
+                if($Req[$i])
+                {
+                    $x += "`r`n    [Required]`r`n    public required int $($VarName[$i])Id"
+                }else
+                {
+                    $x += "`r`n    public int? $($VarName[$i])Id"
+                }
             }
-
             $x += " {get;set;}"
         }
     }
@@ -367,7 +455,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
         $IsList = $false
         $TrueType = $Type[$i]
 
-        if($Type[$i] -cmatch ".*<.*>")
+        if($Type[$i] -cmatch "[(ICollection)(IEnumerable)]<.*>")
         {
             $IsList = $true
             $open = $Type[$i].LastIndexOf('<') + 1
@@ -383,7 +471,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
         {
             if($IsList)
             {
-                $x += "`r`n    public ICollection<$($TrueType)> $($VarName[$i])"
+                $x += "`r`n    public IEnumerable<$($TrueType)> $($VarName[$i])"
             }else
             {
                 $x += "`r`n    public $($TrueType)? $($VarName[$i])"
@@ -399,7 +487,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
         {
             if($IsList)
             {
-                $x += "`r`n    public ICollection<int> $($VarName[$i])"
+                $x += "`r`n    public IEnumerable<int> $($VarName[$i])"
             }else
             {
                 $x += "`r`n    public int? $($VarName[$i])Id"
@@ -416,7 +504,8 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
 
     $File = $x + "`r`n" + $File.Substring($start + 1)
 
-    Write-Output $File
+    # Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs"
+
 
     return
 }

@@ -346,7 +346,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
 
     $File = $x.Substring(0, $x.Length - 1) + "`r`n        " + $File.Substring($start + 1)
 
-    Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs"
+    Write-Output $File.TrimEnd("`r", "`n") | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs"
 
     $File = Get-Content "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs" -Raw
 
@@ -524,7 +524,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
 
     $File = $x + "`r`n" + $File.Substring($start + 1)
 
-    Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs"
+    Write-Output $File.TrimEnd("`r", "`n") | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs"
     
     if($PSBoundParameters.ContainsKey("SkipMap")){return}
 
@@ -566,10 +566,9 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
             $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
         }
 
-        $x += "`r`n"
-
         if($BuiltInTypes -contains $TrueType -and $IsList -eq $false)
         {
+            $x += "`r`n"
             $x += @"
 
         builder.Property($($EntityNameLower) => $($EntityNameLower).$($VarName[$i]))
@@ -580,15 +579,10 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
                 $x += "`r`n            .HasMaxLength(255)"
             }
             $x += ";"
-
-            if($i -lt $VarName.Count - 1)
-            {
-                $x += "`r`n"
-            }
         }
     }
 
-    $File = $x + "    " + $File.Substring($start + 1)
+    $File = $x + "`r`n    " + $File.Substring($start + 1)
 
     if($PSBoundParameters.ContainsKey("MapFK"))
     {
@@ -636,17 +630,13 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
                 }
                 $x += ";"
 
-                if($i -lt $VarName.Count - 1)
-                {
-                    $x += "`r`n"
-                }
-
+                $x += "`r`n"
             }
         }
-        $File = $x + "    " + $File.Substring($FKStart + 1)
+        $File = $x + "`r`n        " + $File.Substring($FKStart + 1)
     }
 
-    Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Core\Entities\$($EntityName)\Mapping\$($EntityName)ClassMap.cs"
+    Write-Output $File.TrimEnd("`r", "`n") | Out-File -FilePath "$($Variables["TargetRootPath"])\Core\Entities\$($EntityName)\Mapping\$($EntityName)ClassMap.cs"
 
     return
 }

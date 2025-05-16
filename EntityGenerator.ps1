@@ -346,7 +346,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
 
     $File = $x.Substring(0, $x.Length - 1) + "`r`n        " + $File.Substring($start + 1)
 
-    # Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs"
+    Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)DTO.cs"
 
     $File = Get-Content "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs" -Raw
 
@@ -524,14 +524,15 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
 
     $File = $x + "`r`n" + $File.Substring($start + 1)
 
-    # Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs"
+    Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Domain\Entities\$($EntityName)\Models\$($EntityName)Payloads.cs"
     
     if($PSBoundParameters.ContainsKey("SkipMap")){return}
 
     $File = Get-Content "$($Variables["TargetRootPath"])\Core\Entities\$($EntityName)\Mapping\$($EntityName)ClassMap.cs" -Raw
 
-    $x = [regex]::Match($File, "builder.ToTable(`"tb_$($EntityNameLower)`");")
-    $y = $x.Index + $x.Length
+    $x = "builder.ToTable(`"tb_$($EntityNameLower)`");"
+    $a = $File.IndexOf($x)
+    $y = $a + $x.Length
 
     $start = $y
     $scope = 1
@@ -565,9 +566,12 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
             $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
         }
 
+        $x += "`r`n"
+
         if($BuiltInTypes -contains $TrueType -and $IsList -eq $false)
         {
             $x += @"
+
         builder.Property($($EntityNameLower) => $($EntityNameLower).$($VarName[$i]))
             .HasColumnName("$(ToSnake $VarName[$i])")
 "@
@@ -575,29 +579,74 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
             {
                 $x += "`r`n            .HasMaxLength(255)"
             }
-            $x += ";`r`n`r`n"
-        }elseif($PSBoundParameters.ContainsKey("MapFK") -and (Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs"))
-        {
-            if($IsList)
-            {
-                $x += "`r`n    public IEnumerable<int> $($VarName[$i])"
-            }else
-            {
-                $x += "`r`n    public int? $($VarName[$i])Id"
-            }
+            $x += ";"
 
-            $x += " {get;set;}"
-
-            if($i -ge $VarName.Count - 1)
+            if($i -lt $VarName.Count - 1)
             {
                 $x += "`r`n"
             }
         }
     }
 
-    $File = $x + "`r`n" + $File.Substring($start + 1)
+    $File = $x + "    " + $File.Substring($start + 1)
 
-    Write-Output $File
+    if($PSBoundParameters.ContainsKey("MapFK"))
+    {
+        $x = ".HasName(`"PK_____$($EntityName)`");"
+
+        $FKStart = $File.IndexOf($x) + $x.Length
+        $File = $File.Remove($FKStart, $a - ($FKStart + 1))
+
+        $x = $File.Substring(0, $FKStart) + "`r`n"
+        for($i = 0; $i -lt $VarName.Count; $i++)
+        {
+            $IsList = $false
+            $TrueType = $Type[$i]
+
+            if($Type[$i] -cmatch "[(ICollection)(IEnumerable)]<.*>")
+            {
+                $IsList = $true
+                $open = $Type[$i].LastIndexOf('<') + 1
+                $close = $Type[$i].IndexOf('>')
+                $TrueType = $Type[$i].Substring($open, $close - $open)
+            }elseif($Type[$i] -cmatch ".*\[\]")
+            {
+                $IsList = $true
+                $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
+            }
+
+            if((Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs"))
+            {
+                if($IsList)
+                {
+                    $x += @"
+
+        builder.HasMany($($EntityNameLower) => $($EntityNameLower).$($VarName[$i]))
+            .WithOne()
+"@
+                }else
+                {
+                    $x += @"
+
+        builder.HasOne($($EntityNameLower) => $($EntityNameLower).$($VarName[$i]))
+            .WithMany()
+            .HasForeignKey("$(ToSnake $VarName[$i])_id")
+            .HasPrincipalKey(obj => obj.Id)
+"@
+                }
+                $x += ";"
+
+                if($i -lt $VarName.Count - 1)
+                {
+                    $x += "`r`n"
+                }
+
+            }
+        }
+        $File = $x + "    " + $File.Substring($FKStart + 1)
+    }
+
+    Write-Output $File | Out-File -FilePath "$($Variables["TargetRootPath"])\Core\Entities\$($EntityName)\Mapping\$($EntityName)ClassMap.cs"
 
     return
 }

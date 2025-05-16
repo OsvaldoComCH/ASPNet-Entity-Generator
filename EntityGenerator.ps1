@@ -33,6 +33,20 @@ function ToSnake
     return $Value
 }
 
+function Find-Enum
+{
+    param(
+        [Parameter(Mandatory=$true)][string]$Name
+    )
+    $items = Get-ChildItem -Path "$($Variables["TargetRootPath"])\Domain\Entities" -Recurse | Where-Object {!$PsIsContainer -and $_.Name -eq "$($Name).cs"}
+
+    if($items.Length -ge 1)
+    {
+        return $true
+    }
+    return $false
+}
+
 foreach($Option in $Config)
 {
     if($Option -eq "")
@@ -49,6 +63,7 @@ if($PSBoundParameters.ContainsKey("GenerateExtensions"))
     New-Item -Path "$($Variables["TargetRootPath"])\Configuration\ConfigureServicesExtension.cs" -ItemType File -Force
 
     Write-Output @"
+using Api.Core;
 using Api.Core.Repositories;
 using Api.Domain.Models;
 using Api.Domain.Repositories;
@@ -67,6 +82,7 @@ public static partial class ServiceCollectionExtension
 "@ | Out-File -FilePath "$($Variables["TargetRootPath"])\Configuration\ConfigureRepositoriesExtension.cs"
 
     Write-Output @"
+using Api.Core;
 using Api.Core.Services;
 using Api.Domain.Models;
 using Api.Domain.Services;
@@ -218,7 +234,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
             $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
         }
 
-        if($BuiltInTypes -contains $TrueType)
+        if($BuiltInTypes -contains $TrueType -or (Find-Enum "$($TrueType)"))
         {
             if($IsList)
             {
@@ -317,7 +333,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
             $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
         }
 
-        if($BuiltInTypes -contains $TrueType)
+        if($BuiltInTypes -contains $TrueType -or (Find-Enum "$($TrueType)"))
         {
             $x += "`r`n            obj.$($VarName[$i]),"
         }elseif(Test-Path "$($Variables["TargetRootPath"])\Domain\Entities\$($TrueType)\Models\$($TrueType).cs")
@@ -400,7 +416,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
             $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
         }
 
-        if($BuiltInTypes -contains $TrueType)
+        if($BuiltInTypes -contains $TrueType -or (Find-Enum "$($TrueType)"))
         {
             if($IsList)
             {
@@ -487,7 +503,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
             $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
         }
 
-        if($BuiltInTypes -contains $TrueType)
+        if($BuiltInTypes -contains $TrueType -or (Find-Enum "$($TrueType)"))
         {
             if($IsList)
             {
@@ -566,7 +582,7 @@ if($PSBoundParameters.ContainsKey("ImplementEntity"))
             $TrueType = $Type[$i].Substring(0, $Type[$i].Length - 2)
         }
 
-        if($BuiltInTypes -contains $TrueType -and $IsList -eq $false)
+        if(($BuiltInTypes -contains $TrueType -or (Find-Enum "$($TrueType)")) -and $IsList -eq $false)
         {
             $x += "`r`n"
             $x += @"
@@ -776,8 +792,6 @@ foreach($line in $Content)
 
 Write-Output $ContentOut.TrimEnd("`r", "`n") | Out-File -FilePath "$($Variables["TargetRootPath"])\Core\$($Variables["DbContext"]).cs"
 
-
-
 $Content = Get-Content "$($Variables["TargetRootPath"])\Configuration\ConfigureRepositoriesExtension.cs"
 $ContentOut = ""
 
@@ -790,13 +804,12 @@ foreach($line in $Content)
         services.AddScoped<BaseRepository<$($EntityName)>, $($EntityName)Repository>();
         services.AddScoped<I$($EntityName)Repository, $($EntityName)Repository>();
 
+
 "@
     }
 }
 
 Write-Output $ContentOut.TrimEnd("`r", "`n") | Out-File -FilePath "$($Variables["TargetRootPath"])\Configuration\ConfigureRepositoriesExtension.cs"
-
-
 
 $Content = Get-Content "$($Variables["TargetRootPath"])\Configuration\ConfigureServicesExtension.cs"
 $ContentOut = ""
@@ -809,6 +822,7 @@ foreach($line in $Content)
         $ContentOut += @"
         services.AddScoped<BaseService<$($EntityName)>, $($EntityName)Service>();
         services.AddScoped<I$($EntityName)Service, $($EntityName)Service>();
+
 
 "@
     }
